@@ -175,27 +175,93 @@ class ReuseAddrHTTPServer(socketserver.TCPServer):
     allow_reuse_address = True
 
 def start_terminal():
+    # Force stdout/stderr to be unbuffered to ensure logs appear immediately in Flux dashboard
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except (AttributeError, TypeError):
+        pass
+
+    print("Proxy RNN: Initializing secure boot...", flush=True)
+
+    # 1. Determine credentials file path (supporting /data or /appdata volumes)
+    credentials_file = "credentials.json"
+    if os.path.exists("/data") and os.path.isdir("/data"):
+        credentials_file = "/data/credentials.json"
+    elif os.path.exists("/appdata") and os.path.isdir("/appdata"):
+        credentials_file = "/appdata/credentials.json"
+
+    # 2. Get port and credentials
+    port_env = os.environ.get("APP_PORT", "8080")
+    try:
+        port = int(port_env)
+    except ValueError:
+        print(f"Invalid APP_PORT: {port_env}. Defaulting to 8080.", flush=True)
+        port = 8080
+
+    user = os.environ.get("TERMINAL_USER")
+    password = os.environ.get("TERMINAL_PASSWORD")
+
+    if not password:
+        if os.path.exists(credentials_file):
+            try:
+                with open(credentials_file, "r") as f:
+                    creds = json.load(f)
+                    user = creds.get("username", "admin")
+                    password = creds.get("password")
+            except Exception as e:
+                print(f"Error reading credentials file: {e}", flush=True)
+        
+        if not password:
+            setup_token = secrets.token_hex(16)
+            SetupHandler.setup_token = setup_token
+            SetupHandler.credentials_file = credentials_file
+            
+            server = ReuseAddrHTTPServer(("", port), SetupHandler)
+            SetupHandler.server_instance = server
+            
+            print("\n" + "="*80, flush=True)
+            print(" ACTION REQUIRED: SECURE SETUP REQUIRED", flush=True)
+            print(f" Please visit: http://<your-flux-node-ip>:{port}/?token={setup_token}", flush=True)
+            print(" Enter the username and password you want to use for the terminal.", flush=True)
+            print("="*80 + "\n", flush=True)
+            sys.stdout.flush()
+            
+            server.serve_forever()
+            
+            # Reload credentials after server shutdown
+            try:
+                with open(credentials_file, "r") as f:
+                    creds = json.load(f)
+                    user = creds.get("username", "admin")
+                    password = creds.get("password")
+            except Exception as e:
+                print(f"Error reading credentials file after setup: {e}", flush=True)
+                sys.exit(1)
+
+    if not user:
+        user = "admin"
+
+    # 3. Download binaries (only after credentials are verified/set)
     ttyd_path = "/tmp/ttyd"
-    
-    # 1. Download ttyd binary
-    print("Downloading ttyd (Web Terminal)...")
+    print("Downloading ttyd (Web Terminal)...", flush=True)
     try:
         urllib.request.urlretrieve("https://github.com/tsl0922/ttyd/releases/download/1.7.4/ttyd.x86_64", ttyd_path)
         os.chmod(ttyd_path, 0o755)
     except Exception as e:
-        print(f"Error downloading ttyd: {e}")
+        print(f"Error downloading ttyd: {e}", flush=True)
         sys.exit(1)
 
     tmux_path = "/tmp/tmux"
-    print("Downloading tmux...")
+    print("Downloading tmux...", flush=True)
     try:
         urllib.request.urlretrieve("https://github.com/pythops/tmux-linux-binary/releases/download/v3.6a/tmux-linux-x86_64", tmux_path)
         os.chmod(tmux_path, 0o755)
     except Exception as e:
-        print(f"Error downloading tmux: {e}")
+        print(f"Error downloading tmux: {e}", flush=True)
         sys.exit(1)
 
-    print("Downloading GitHub CLI (gh)...")
+    print("Downloading GitHub CLI (gh)...", flush=True)
     try:
         import tarfile
         gh_tar_path = "/tmp/gh.tar.gz"
@@ -208,10 +274,9 @@ def start_terminal():
                     break
         os.chmod("/tmp/gh", 0o755)
     except Exception as e:
-        print(f"Error downloading gh: {e}")
-        # We don't exit here because gh is optional, but it's good to know if it failed.
+        print(f"Error downloading gh: {e}", flush=True)
 
-    print("Downloading VS Code CLI...")
+    print("Downloading VS Code CLI...", flush=True)
     try:
         code_tar_path = "/tmp/code.tar.gz"
         urllib.request.urlretrieve("https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64", code_tar_path)
@@ -222,68 +287,13 @@ def start_terminal():
                     break
         os.chmod("/tmp/code", 0o755)
     except Exception as e:
-        print(f"Error downloading VS Code CLI: {e}")
+        print(f"Error downloading VS Code CLI: {e}", flush=True)
 
     # Add /tmp to PATH so that gh and tmux can be executed just by typing their names
     os.environ["PATH"] = f"/tmp:{os.environ.get('PATH', '')}"
 
-    # 2. Get port and credentials
-    port_env = os.environ.get("APP_PORT", "8080")
-    try:
-        port = int(port_env)
-    except ValueError:
-        print(f"Invalid APP_PORT: {port_env}. Defaulting to 8080.")
-        port = 8080
-
-    user = os.environ.get("TERMINAL_USER")
-    password = os.environ.get("TERMINAL_PASSWORD")
-
-    if not password:
-        credentials_file = "credentials.json"
-        if os.path.exists("/data") and os.path.isdir("/data"):
-            credentials_file = "/data/credentials.json"
-            
-        if os.path.exists(credentials_file):
-            try:
-                with open(credentials_file, "r") as f:
-                    creds = json.load(f)
-                    user = creds.get("username", "admin")
-                    password = creds.get("password")
-            except Exception as e:
-                print(f"Error reading credentials file: {e}")
-        
-        if not password:
-            setup_token = secrets.token_hex(16)
-            SetupHandler.setup_token = setup_token
-            SetupHandler.credentials_file = credentials_file
-            
-            server = ReuseAddrHTTPServer(("", port), SetupHandler)
-            SetupHandler.server_instance = server
-            
-            print("\n" + "="*80)
-            print(" ACTION REQUIRED: SECURE SETUP REQUIRED")
-            print(f" Please visit: http://<your-flux-node-ip>:{port}/?token={setup_token}")
-            print(" Enter the username and password you want to use for the terminal.")
-            print("="*80 + "\n")
-            sys.stdout.flush()
-            
-            server.serve_forever()
-            
-            # Reload credentials after server shutdown
-            try:
-                with open(credentials_file, "r") as f:
-                    creds = json.load(f)
-                    user = creds.get("username", "admin")
-                    password = creds.get("password")
-            except Exception as e:
-                print(f"Error reading credentials file after setup: {e}")
-                sys.exit(1)
-
-    if not user:
-        user = "admin"
-
-    # 3. Start the terminal
-    print(f"Starting secure terminal on port {port}...")
+    # 4. Start the terminal
+    print(f"Starting secure terminal on port {port}...", flush=True)
     
     # -W: writable (allow typing commands)
     # -p <port>: port

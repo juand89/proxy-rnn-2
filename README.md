@@ -63,6 +63,6 @@ Deploy your container to the Flux network with the following environment variabl
 If you restart your container or update the deployment, the local `credentials.json` file will be lost if your container has no persistent volume. 
 
 To keep your password persistent across restarts:
-1. Mount a persistent volume at path `/data` inside your Flux container settings.
-2. The setup script automatically detects the presence of `/data` and saves your credentials to `/data/credentials.json`.
-3. If `/data` is present, you will only have to run this setup wizard **once**. If no volume is mounted, you will need to re-run the setup page and get a new token from the logs every time the container restarts.
+1. Mount a persistent volume at path `/data` or `/appdata` inside your Flux container settings.
+2. The setup script automatically detects the presence of `/data` or `/appdata` and saves your credentials to `<volume_path>/credentials.json`.
+3. If one of these volumes is mounted, you will only have to run this setup wizard **once**. If no volume is mounted, you will need to re-run the setup page and get a new token from the logs every time the container restarts.
