@@ -3,176 +3,6 @@ import subprocess
 import urllib.request
 import sys
 import json
-import secrets
-import urllib.parse
-import http.server
-import socketserver
-import threading
-
-class SetupHandler(http.server.BaseHTTPRequestHandler):
-    setup_token = None
-    credentials_file = "credentials.json"
-    server_instance = None
-
-    def log_message(self, format, *args):
-        pass
-
-    def do_GET(self):
-        parsed_url = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed_url.query)
-        token = params.get("token", [None])[0]
-        
-        if not self.setup_token or token != self.setup_token:
-            self.send_response(403)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Forbidden: Invalid or missing setup token. Check container logs.")
-            return
-
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Terminal Setup</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body {{
-                    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                    background: linear-gradient(135deg, #121214 0%, #1a1a24 100%);
-                    color: #e0e0e0;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    height: 100vh;
-                    margin: 0;
-                }}
-                .container {{
-                    background: rgba(30, 30, 40, 0.85);
-                    backdrop-filter: blur(10px);
-                    padding: 40px;
-                    border-radius: 16px;
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-                    width: 320px;
-                }}
-                h2 {{ 
-                    margin-top: 0; 
-                    color: #ffffff; 
-                    text-align: center; 
-                    font-weight: 600;
-                    margin-bottom: 24px;
-                }}
-                label {{ 
-                    display: block; 
-                    margin-top: 18px; 
-                    margin-bottom: 6px; 
-                    font-size: 14px;
-                    color: #a0a0b0;
-                }}
-                input[type="text"], input[type="password"] {{
-                    width: 100%;
-                    padding: 10px 12px;
-                    border: 1px solid rgba(255, 255, 255, 0.15);
-                    background-color: rgba(0, 0, 0, 0.2);
-                    color: #fff;
-                    border-radius: 6px;
-                    box-sizing: border-box;
-                    transition: border-color 0.2s;
-                }}
-                input[type="text"]:focus, input[type="password"]:focus {{
-                    border-color: #007acc;
-                    outline: none;
-                }}
-                button {{
-                    width: 100%;
-                    padding: 12px;
-                    background: linear-gradient(135deg, #007acc 0%, #005999 100%);
-                    border: none;
-                    color: white;
-                    border-radius: 6px;
-                    margin-top: 28px;
-                    cursor: pointer;
-                    font-weight: bold;
-                    font-size: 15px;
-                    box-shadow: 0 4px 12px rgba(0, 122, 204, 0.3);
-                    transition: opacity 0.2s;
-                }}
-                button:hover {{ 
-                    opacity: 0.95;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h2>Terminal Setup</h2>
-                <form method="POST" action="/save?token={token}">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" name="username" required value="admin">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required placeholder="Choose a secure password">
-                    <button type="submit">Save & Start Terminal</button>
-                </form>
-            </div>
-        </body>
-        </html>
-        """
-        self.wfile.write(html.encode("utf-8"))
-
-    def do_POST(self):
-        parsed_url = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed_url.query)
-        token = params.get("token", [None])[0]
-        
-        if not self.setup_token or token != self.setup_token:
-            self.send_response(403)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Forbidden: Invalid token.")
-            return
-
-        if parsed_url.path == "/save":
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length).decode('utf-8')
-            fields = urllib.parse.parse_qs(post_data)
-            
-            username = fields.get("username", ["admin"])[0]
-            password = fields.get("password", [""])[0]
-            
-            if not password:
-                self.send_response(400)
-                self.send_header("Content-type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"Password cannot be empty.")
-                return
-            
-            # Save credentials
-            with open(self.credentials_file, "w") as f:
-                json.dump({"username": username, "password": password}, f)
-                
-            self.send_response(200)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(b"""
-            <html>
-            <body style="background:#121214; color:#e0e0e0; font-family:sans-serif; text-align:center; padding-top:100px;">
-                <h2>Setup Complete!</h2>
-                <p>Credentials saved. The terminal is starting now.</p>
-                <p>Please wait a few seconds, then <a href="/" style="color:#007acc; text-decoration:none; font-weight:bold;">Refresh Page</a> to log in.</p>
-            </body>
-            </html>
-            """)
-            
-            # Stop the server in a separate thread so we can complete this response first
-            def shutdown_server():
-                self.server_instance.shutdown()
-            threading.Thread(target=shutdown_server).start()
-
-class ReuseAddrHTTPServer(socketserver.TCPServer):
-    allow_reuse_address = True
 
 def start_terminal():
     # Force stdout/stderr to be unbuffered to ensure logs appear immediately in Flux dashboard
@@ -184,9 +14,11 @@ def start_terminal():
 
     print("Proxy RNN: Initializing secure boot...", flush=True)
 
-    # 1. Determine credentials file path (supporting /data or /appdata volumes)
+    # 1. Determine credentials file path (supporting /app, /data, or /appdata volumes)
     credentials_file = "credentials.json"
-    if os.path.exists("/data") and os.path.isdir("/data"):
+    if os.path.exists("/app") and os.path.isdir("/app"):
+        credentials_file = "/app/credentials.json"
+    elif os.path.exists("/data") and os.path.isdir("/data"):
         credentials_file = "/data/credentials.json"
     elif os.path.exists("/appdata") and os.path.isdir("/appdata"):
         credentials_file = "/appdata/credentials.json"
@@ -202,42 +34,25 @@ def start_terminal():
     user = os.environ.get("TERMINAL_USER")
     password = os.environ.get("TERMINAL_PASSWORD")
 
+    # If password is not provided in environment variables, try to load it from credentials file
     if not password:
         if os.path.exists(credentials_file):
             try:
                 with open(credentials_file, "r") as f:
                     creds = json.load(f)
-                    user = creds.get("username", "admin")
+                    # Use username from JSON if not explicitly provided in environment
+                    if not user:
+                        user = creds.get("username")
                     password = creds.get("password")
             except Exception as e:
                 print(f"Error reading credentials file: {e}", flush=True)
-        
+        else:
+            print(f"Warning: credentials file not found at {credentials_file}", flush=True)
+
         if not password:
-            setup_token = secrets.token_hex(16)
-            SetupHandler.setup_token = setup_token
-            SetupHandler.credentials_file = credentials_file
-            
-            server = ReuseAddrHTTPServer(("", port), SetupHandler)
-            SetupHandler.server_instance = server
-            
-            print("\n" + "="*80, flush=True)
-            print(" ACTION REQUIRED: SECURE SETUP REQUIRED", flush=True)
-            print(f" Please visit: http://<your-flux-node-ip>:{port}/?token={setup_token}", flush=True)
-            print(" Enter the username and password you want to use for the terminal.", flush=True)
-            print("="*80 + "\n", flush=True)
-            sys.stdout.flush()
-            
-            server.serve_forever()
-            
-            # Reload credentials after server shutdown
-            try:
-                with open(credentials_file, "r") as f:
-                    creds = json.load(f)
-                    user = creds.get("username", "admin")
-                    password = creds.get("password")
-            except Exception as e:
-                print(f"Error reading credentials file after setup: {e}", flush=True)
-                sys.exit(1)
+            print(f"Error: No TERMINAL_PASSWORD set and could not load from {credentials_file}.", flush=True)
+            print("Please set TERMINAL_PASSWORD environment variable or create the credentials.json file.", flush=True)
+            sys.exit(1)
 
     if not user:
         user = "admin"
